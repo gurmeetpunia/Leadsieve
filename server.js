@@ -3,74 +3,58 @@ const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
 const path = require("path");
+const { scrape, detectPlatform } = require("./scrapers");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+// Change this line:
 app.use(express.static(path.join(__dirname, "public")));
 
-const { exec } = require("child_process");
-const util = require("util");
-const execPromise = util.promisify(exec);
-
-async function fetchWithYtDlp(url, maxComments = 500) {
-  // Use yt-dlp to fetch video info + comments — no API key needed
-  const cmd = `py -m yt_dlp --write-comments --skip-download --dump-json --no-warnings "${url}"`;
-  const { stdout } = await execPromise(cmd, { maxBuffer: 50 * 1024 * 1024 });
-
-  const data = JSON.parse(stdout.trim().split("\n")[0]);
-
-  const title = data.title || "Unknown Video";
-  const rawComments = data.comments || [];
-
-  const comments = rawComments
-    .filter(c => c.text && c.text.trim().length > 0)
-    .slice(0, maxComments)
-    .map(c => ({
-      text: c.text,
-      likes: c.like_count || 0,
-      author: c.author || "Unknown",
-    }));
-
-  return { title, comments };
-}
-
 async function analyzeWithNLP(comments, videoTitle) {
-  // Call our local Python NLP engine — no external AI API needed
   const NLP_URL = process.env.NLP_ENGINE_URL || "http://localhost:5001";
-
   const res = await axios.post(`${NLP_URL}/analyze`, {
     comments,
     videoTitle,
   }, {
     headers: { "Content-Type": "application/json" },
-    timeout: 600000, // 10 min timeout — first run downloads models
+    timeout: 600000,
   });
-
   return res.data;
 }
 
 app.post("/api/analyze", async (req, res) => {
   const { url } = req.body;
+
   if (!url) {
-    return res.status(400).json({ error: "Missing required field: url" });
+    return res.status(400).json({ error: "Please paste a URL to analyze." });
   }
 
   try {
-    const { title: videoTitle, comments } = await fetchWithYtDlp(url, 500);
+    const { platform, title, comments } = await scrape(url, 500);
 
-    if (comments.length === 0) return res.status(400).json({ error: "No comments found on this video." });
+    if (!comments || comments.length === 0) {
+      return res.status(400).json({ error: "No comments found. The post may be empty or private." });
+    }
 
-    const report = await analyzeWithNLP(comments, videoTitle);
-    return res.json({ success: true, videoTitle, totalComments: comments.length, report });
+    const report = await analyzeWithNLP(comments, title);
+
+    return res.json({
+      success: true,
+      platform,
+      videoTitle: title,
+      totalComments: comments.length,
+      report,
+    });
 
   } catch (err) {
-    console.error("Error:", err.response?.data || err.message);
-    if (err.response?.status === 403) return res.status(403).json({ error: "Invalid API key or quota exceeded." });
-    if (err instanceof SyntaxError) return res.status(500).json({ error: "AI returned malformed response. Try again." });
+    console.error("Error:", err.message);
     return res.status(500).json({ error: err.message || "Something went wrong." });
   }
 });
+
+// Health check
+app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 

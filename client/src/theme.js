@@ -1,0 +1,33 @@
+export const theme = {
+  colors: {
+    bg: '#060608',
+    surface: '#0e0e12',
+    surface2: '#16161c',
+    surface3: '#1e1e26',
+    border: 'rgba(255,255,255,0.07)',
+    border2: 'rgba(255,255,255,0.13)',
+    text: '#eeeef0',
+    muted: '#7a7a8a',
+    dim: '#3a3a4a',
+    green: '#00d68f',
+    greenDark: '#00a36b',
+    greenGlow: 'rgba(0,214,143,0.08)',
+    greenGlow2: 'rgba(0,214,143,0.15)',
+    amber: '#f5a623',
+    red: '#ff5f5f',
+    blue: '#5b9cf6',
+    purple: '#a78bfa',
+  },
+  fonts: {
+    heading: "'Syne', sans-serif",
+    body: "'Inter', sans-serif",
+    mono: "'Courier New', monospace",
+  },
+  radius: {
+    sm: '8px',
+    md: '12px',
+    lg: '16px',
+    xl: '20px',
+    full: '9999px',
+  },
+}
