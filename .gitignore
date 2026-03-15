@@ -33,6 +33,3 @@ build/
 # OS
 Thumbs.db
 .DS_Store
-
-client/node_modules/
-client/dist/
