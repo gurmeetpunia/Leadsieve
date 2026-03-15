@@ -1,0 +1,6 @@
+flask
+flask-cors
+transformers
+keybert
+sentence-transformers
+scikit-learn

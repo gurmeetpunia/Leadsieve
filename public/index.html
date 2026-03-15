@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Leadsieve — Turn noise into intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --surface2: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --border-hover: rgba(255,255,255,0.18);
+    --text: #f0f0f0;
+    --text-muted: #888;
+    --text-dim: #555;
+    --green: #1D9E75;
+    --green-light: #E1F5EE;
+    --green-glow: rgba(29,158,117,0.15);
+    --amber: #EF9F27;
+    --red: #E24B4A;
+    --blue: #378ADD;
+    --mono: 'DM Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  /* ── Nav ── */
+  nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 40px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 500;
+    letter-spacing: -0.3px;
+    color: var(--text);
+  }
+  .logo span { color: var(--green); }
+  .nav-tag {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--green);
+    background: var(--green-glow);
+    border: 1px solid rgba(29,158,117,0.3);
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+
+  /* ── Main container ── */
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ── Hero ── */
+  .hero {
+    text-align: center;
+    padding: 72px 0 48px;
+  }
+  .hero-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--green);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: clamp(32px, 5vw, 52px);
+    font-weight: 300;
+    line-height: 1.15;
+    letter-spacing: -1px;
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+  .hero h1 em {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--green);
+  }
+  .hero p {
+    font-size: 16px;
+    color: var(--text-muted);
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  /* ── Input card ── */
+  .input-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 16px;
+  }
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+  label {
+    display: block;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+  input[type="text"], input[type="password"] {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 14px;
+    font-family: var(--sans);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input[type="text"]:focus, input[type="password"]:focus {
+    border-color: var(--green);
+  }
+  input::placeholder { color: var(--text-dim); }
+
+  .key-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    font-family: var(--mono);
+  }
+  .hint a { color: var(--green); text-decoration: none; }
+  .hint a:hover { text-decoration: underline; }
+
+  /* ── Source tabs ── */
+  .source-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .source-tab {
+    font-size: 12px;
+    font-family: var(--mono);
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .source-tab:hover { border-color: var(--border-hover); color: var(--text); }
+  .source-tab.active {
+    background: var(--green-glow);
+    border-color: rgba(29,158,117,0.4);
+    color: var(--green);
+  }
+  .source-tab.soon {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* ── Analyze button ── */
+  .analyze-btn {
+    width: 100%;
+    padding: 16px;
+    background: var(--green);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 15px;
+    font-family: var(--sans);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .analyze-btn:hover { background: #0F6E56; }
+  .analyze-btn:active { transform: scale(0.99); }
+  .analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* ── Loading ── */
+  .loading {
+    display: none;
+    text-align: center;
+    padding: 60px 0;
+  }
+  .loading.active { display: block; }
+  .spinner {
+    width: 36px;
+    height: 36px;
+    border: 2px solid var(--border);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 20px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-steps { font-size: 13px; color: var(--text-muted); font-family: var(--mono); }
+  .loading-steps span { display: block; margin-bottom: 4px; }
+  .loading-steps .done { color: var(--green); }
+
+  /* ── Error ── */
+  .error-box {
+    display: none;
+    background: rgba(226,75,74,0.1);
+    border: 1px solid rgba(226,75,74,0.3);
+    border-radius: 10px;
+    padding: 14px 18px;
+    font-size: 13px;
+    color: #F09595;
+    margin-top: 12px;
+    font-family: var(--mono);
+  }
+  .error-box.active { display: block; }
+
+  /* ── Report ── */
+  #report { display: none; margin-top: 40px; }
+  #report.active { display: block; }
+
+  .report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .report-title { font-size: 13px; color: var(--text-muted); font-family: var(--mono); margin-bottom: 6px; }
+  .report-video { font-size: 18px; font-weight: 500; color: var(--text); line-height: 1.3; }
+  .report-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+  .meta-chip {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .meta-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+
+  /* ── Stat row ── */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+  }
+  .stat-number { font-size: 28px; font-weight: 500; line-height: 1; margin-bottom: 4px; }
+  .stat-label { font-size: 11px; font-family: var(--mono); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+  .stat-green { color: var(--green); }
+  .stat-amber { color: var(--amber); }
+  .stat-red { color: var(--red); }
+
+  /* ── Summary card ── */
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--green);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    font-size: 15px;
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+
+  /* ── Section ── */
+  .section { margin-bottom: 28px; }
+  .section-title {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Sentiment bar ── */
+  .sentiment-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .sent-bar {
+    height: 8px;
+    border-radius: 4px;
+    display: flex;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .sent-pos { background: var(--green); }
+  .sent-neu { background: var(--amber); }
+  .sent-neg { background: var(--red); }
+  .sent-legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+
+  /* ── Themes ── */
+  .theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .theme-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .theme-name { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+  .theme-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 8px; }
+  .theme-bar-wrap { display: flex; align-items: center; gap: 8px; }
+  .theme-bar-bg { flex: 1; height: 3px; background: var(--surface2); border-radius: 2px; }
+  .theme-bar-fill { height: 3px; border-radius: 2px; }
+  .fill-pos { background: var(--green); }
+  .fill-neu { background: var(--amber); }
+  .fill-neg { background: var(--red); }
+  .theme-count { font-size: 11px; font-family: var(--mono); color: var(--text-dim); }
+
+  /* ── Lists ── */
+  .list-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 13px 18px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .list-item:last-child { border-bottom: none; }
+  .list-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+    margin-top: 1px;
+    font-family: var(--mono);
+    font-weight: 500;
+  }
+  .icon-q { background: rgba(55,138,221,0.15); color: var(--blue); }
+  .icon-pain { background: rgba(226,75,74,0.12); color: var(--red); }
+  .icon-praise { background: rgba(29,158,117,0.12); color: var(--green); }
+
+  /* ── Action insights ── */
+  .insight-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 10px;
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .priority-badge {
+    font-size: 10px;
+    font-family: var(--mono);
+    padding: 3px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .badge-high { background: rgba(226,75,74,0.12); color: #F09595; }
+  .badge-medium { background: rgba(239,159,39,0.12); color: var(--amber); }
+  .badge-low { background: rgba(29,158,117,0.1); color: var(--green); }
+  .insight-text { flex: 1; }
+  .insight-action { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+  .insight-why { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+  /* ── Notable comments ── */
+  .comment-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+  }
+  .comment-text { font-size: 13px; color: var(--text); margin-bottom: 8px; line-height: 1.6; }
+  .comment-meta { display: flex; align-items: center; gap: 10px; }
+  .comment-likes { font-size: 11px; font-family: var(--mono); color: var(--text-dim); }
+  .comment-type {
+    font-size: 10px;
+    font-family: var(--mono);
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+  .type-praise { background: rgba(29,158,117,0.1); color: var(--green); }
+  .type-question { background: rgba(55,138,221,0.1); color: var(--blue); }
+  .type-criticism { background: rgba(226,75,74,0.1); color: var(--red); }
+
+  /* ── New analysis btn ── */
+  .reset-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--sans);
+    transition: all 0.15s;
+  }
+  .reset-btn:hover { border-color: var(--border-hover); color: var(--text); }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center;
+    padding: 40px 0;
+    font-size: 12px;
+    font-family: var(--mono);
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+    margin-top: 60px;
+  }
+
+  @media (max-width: 600px) {
+    nav { padding: 16px 20px; }
+    .input-card { padding: 20px; }
+    .key-row { grid-template-columns: 1fr; }
+    .stat-row { grid-template-columns: 1fr; }
+    .theme-grid { grid-template-columns: 1fr; }
+    .hero { padding: 48px 0 32px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">lead<span>sieve</span></div>
+  <div class="nav-tag">beta v0.1</div>
+</nav>
+
+<div class="container">
+
+  <div class="hero">
+    <div class="hero-eyebrow">Public signal → product intelligence</div>
+    <h1>Turn <em>thousands of comments</em><br>into one clear report</h1>
+    <p>Paste any YouTube URL. Leadsieve reads every comment, finds the signal, and tells you exactly what to do next.</p>
+  </div>
+
+  <!-- Input form -->
+  <div id="inputSection">
+    <div class="source-row">
+      <button class="source-tab active" data-source="youtube">YouTube</button>
+      <button class="source-tab soon" title="Coming soon">Play Store</button>
+      <button class="source-tab soon" title="Coming soon">App Store</button>
+      <button class="source-tab soon" title="Coming soon">Reddit</button>
+    </div>
+
+    <div class="input-card">
+      <div class="field">
+        <label>Video URL</label>
+        <input type="text" id="urlInput" placeholder="https://www.youtube.com/watch?v=..." />
+      </div>
+      </div>
+    </div>
+
+    <button class="analyze-btn" id="analyzeBtn" onclick="runAnalysis()">
+      <span id="btnText">Analyze comments</span>
+    </button>
+
+    <div class="error-box" id="errorBox"></div>
+  </div>
+
+  <!-- Loading state -->
+  <div class="loading" id="loadingSection">
+    <div class="spinner"></div>
+    <div class="loading-steps">
+      <span id="step1">Fetching comments from YouTube...</span>
+      <span id="step2" style="opacity:0.3">Sending to Gemini for analysis...</span>
+      <span id="step3" style="opacity:0.3">Building your report...</span>
+    </div>
+  </div>
+
+  <!-- Report -->
+  <div id="report">
+    <div class="report-header">
+      <div>
+        <div class="report-title">Analysis report</div>
+        <div class="report-video" id="reportTitle"></div>
+        <div class="report-meta">
+          <div class="meta-chip"><div class="meta-dot"></div><span id="reportCommentCount"></span> comments analyzed</div>
+          <div class="meta-chip"><div class="meta-dot" style="background:var(--amber)"></div><span id="reportDate"></span></div>
+        </div>
+      </div>
+      <button class="reset-btn" onclick="resetApp()">← New analysis</button>
+    </div>
+
+    <!-- Sentiment stats -->
+    <div class="stat-row" id="statRow"></div>
+
+    <!-- Summary -->
+    <div class="summary-card" id="summaryCard"></div>
+
+    <!-- Sentiment bar -->
+    <div class="section">
+      <div class="section-title">Sentiment breakdown</div>
+      <div class="sentiment-wrap">
+        <div class="sent-bar" id="sentBar"></div>
+        <div class="sent-legend" id="sentLegend"></div>
+      </div>
+    </div>
+
+    <!-- Top themes -->
+    <div class="section">
+      <div class="section-title">Top themes</div>
+      <div class="theme-grid" id="themeGrid"></div>
+    </div>
+
+    <!-- Two column: questions + pain points -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px;" id="twoCol">
+      <div>
+        <div class="section-title" style="margin-bottom:10px;">Top questions</div>
+        <div class="list-card" id="questionsList"></div>
+      </div>
+      <div>
+        <div class="section-title" style="margin-bottom:10px;">Pain points</div>
+        <div class="list-card" id="painList"></div>
+      </div>
+    </div>
+
+    <!-- Praises -->
+    <div class="section">
+      <div class="section-title">What they love</div>
+      <div class="list-card" id="praiseList"></div>
+    </div>
+
+    <!-- Actionable insights -->
+    <div class="section">
+      <div class="section-title">Actionable insights</div>
+      <div id="insightsList"></div>
+    </div>
+
+    <!-- Notable comments -->
+    <div class="section">
+      <div class="section-title">Notable comments</div>
+      <div id="notableList"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<footer>
+  leadsieve · built by one person · india → world
+</footer>
+
+<script>
+  // Save keys to localStorage for convenience
+  
+  async function runAnalysis() {
+    const url = document.getElementById('urlInput').value.trim();
+    
+    const errorBox = document.getElementById('errorBox');
+
+    errorBox.classList.remove('active');
+
+    if (!url) {
+      showError('Please paste a YouTube video URL.');
+      return;
+    }
+
+    // Show loading
+    document.getElementById('inputSection').style.display = 'none';
+    document.getElementById('loadingSection').classList.add('active');
+    document.getElementById('report').classList.remove('active');
+
+    // Animate loading steps
+    setTimeout(() => {
+      document.getElementById('step1').classList.add('done');
+      document.getElementById('step2').style.opacity = '1';
+    }, 1500);
+    setTimeout(() => {
+      document.getElementById('step2').classList.add('done');
+      document.getElementById('step3').style.opacity = '1';
+    }, 4000);
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Analysis failed.');
+
+      renderReport(data);
+    } catch (err) {
+      document.getElementById('loadingSection').classList.remove('active');
+      document.getElementById('inputSection').style.display = 'block';
+      showError(err.message);
+    }
+  }
+
+  function renderReport(data) {
+    const { videoTitle, totalComments, report } = data;
+    const r = report;
+
+    document.getElementById('loadingSection').classList.remove('active');
+    document.getElementById('report').classList.add('active');
+
+    document.getElementById('reportTitle').textContent = videoTitle;
+    document.getElementById('reportCommentCount').textContent = totalComments.toLocaleString();
+    document.getElementById('reportDate').textContent = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+    // Stat row
+    document.getElementById('statRow').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-number stat-green">${r.sentiment.positive}%</div>
+        <div class="stat-label">Positive</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number stat-amber">${r.sentiment.neutral}%</div>
+        <div class="stat-label">Neutral</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number stat-red">${r.sentiment.negative}%</div>
+        <div class="stat-label">Negative</div>
+      </div>
+    `;
+
+    // Summary
+    document.getElementById('summaryCard').textContent = r.summary;
+
+    // Sentiment bar
+    document.getElementById('sentBar').innerHTML = `
+      <div class="sent-pos" style="width:${r.sentiment.positive}%"></div>
+      <div class="sent-neu" style="width:${r.sentiment.neutral}%"></div>
+      <div class="sent-neg" style="width:${r.sentiment.negative}%"></div>
+    `;
+    document.getElementById('sentLegend').innerHTML = `
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>Positive ${r.sentiment.positive}%</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div>Neutral ${r.sentiment.neutral}%</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div>Negative ${r.sentiment.negative}%</div>
+    `;
+
+    // Themes
+    const maxThemeCount = Math.max(...r.topThemes.map(t => t.count));
+    document.getElementById('themeGrid').innerHTML = r.topThemes.map(t => {
+      const fillClass = t.sentiment === 'positive' ? 'fill-pos' : t.sentiment === 'negative' ? 'fill-neg' : 'fill-neu';
+      const pct = Math.round((t.count / maxThemeCount) * 100);
+      return `<div class="theme-card">
+        <div class="theme-name">${t.theme}</div>
+        <div class="theme-desc">${t.description}</div>
+        <div class="theme-bar-wrap">
+          <div class="theme-bar-bg"><div class="theme-bar-fill ${fillClass}" style="width:${pct}%"></div></div>
+          <div class="theme-count">${t.count}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Questions
+    document.getElementById('questionsList').innerHTML = r.topQuestions.map(q =>
+      `<div class="list-item"><div class="list-icon icon-q">?</div><div>${q}</div></div>`
+    ).join('');
+
+    // Pain points
+    document.getElementById('painList').innerHTML = r.painPoints.map(p =>
+      `<div class="list-item"><div class="list-icon icon-pain">!</div><div>${p}</div></div>`
+    ).join('');
+
+    // Praises
+    document.getElementById('praiseList').innerHTML = r.praises.map(p =>
+      `<div class="list-item"><div class="list-icon icon-praise">+</div><div>${p}</div></div>`
+    ).join('');
+
+    // Insights
+    document.getElementById('insightsList').innerHTML = r.actionableInsights.map(i => `
+      <div class="insight-card">
+        <div class="priority-badge badge-${i.priority}">${i.priority}</div>
+        <div class="insight-text">
+          <div class="insight-action">${i.action}</div>
+          <div class="insight-why">${i.why}</div>
+        </div>
+      </div>
+    `).join('');
+
+    // Notable comments
+    document.getElementById('notableList').innerHTML = r.notableComments.map(c => `
+      <div class="comment-card">
+        <div class="comment-text">"${c.text}"</div>
+        <div class="comment-meta">
+          <div class="comment-likes">▲ ${c.likes} likes</div>
+          <div class="comment-type type-${c.type}">${c.type}</div>
+        </div>
+      </div>
+    `).join('');
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('errorBox');
+    el.textContent = '⚠ ' + msg;
+    el.classList.add('active');
+  }
+
+  function resetApp() {
+    document.getElementById('report').classList.remove('active');
+    document.getElementById('loadingSection').classList.remove('active');
+    document.getElementById('inputSection').style.display = 'block';
+    document.getElementById('urlInput').value = '';
+    document.getElementById('errorBox').classList.remove('active');
+    // Reset loading steps
+    ['step1','step2','step3'].forEach(id => {
+      const el = document.getElementById(id);
+      el.classList.remove('done');
+      el.style.opacity = id === 'step1' ? '1' : '0.3';
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // Enter key triggers analysis
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && document.getElementById('inputSection').style.display !== 'none') {
+      runAnalysis();
+    }
+  });
+</script>
+</body>
+</html>
