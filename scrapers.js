@@ -1,15 +1,7 @@
-/**
- * Leadsieve — Platform Scrapers
- * Each scraper returns: { title, comments: [{text, likes, author}] }
- * No API keys required for any platform.
- */
-
 const axios = require("axios");
 const { exec } = require("child_process");
 const util = require("util");
 const execPromise = util.promisify(exec);
-
-// ── Shared helpers ────────────────────────────────────────────────────────────
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
@@ -20,27 +12,74 @@ function truncate(arr, max = 500) {
   return arr.slice(0, max);
 }
 
-// ── YouTube — via yt-dlp ──────────────────────────────────────────────────────
-
+// ── YouTube — yt-dlp ──────────────────────────────────────────────────────────
 async function scrapeYouTube(url, max = 500) {
-  const cmd = `py -m yt_dlp --write-comments --skip-download --dump-json --no-warnings "${url}"`;
-  const { stdout } = await execPromise(cmd, { maxBuffer: 50 * 1024 * 1024, timeout: 60000 });
-  const data = JSON.parse(stdout.trim().split("\n")[0]);
+  // Try multiple command variations for compatibility
+  const commands = [
+    `yt-dlp --write-comments --skip-download --dump-json --no-warnings --extractor-args "youtube:comment_sort=top" "${url}"`,
+    `py -m yt_dlp --write-comments --skip-download --dump-json --no-warnings "${url}"`,
+    `python -m yt_dlp --write-comments --skip-download --dump-json --no-warnings "${url}"`,
+  ];
+
+  let stdout = null;
+  let lastError = null;
+
+  for (const cmd of commands) {
+    try {
+      const result = await execPromise(cmd, {
+        maxBuffer: 50 * 1024 * 1024,
+        timeout: 90000,
+      });
+      stdout = result.stdout;
+      break;
+    } catch (err) {
+      lastError = err;
+      continue;
+    }
+  }
+
+  if (!stdout) {
+    throw new Error(
+      `yt-dlp failed. Fix: open terminal and run "pip install -U yt-dlp" then try again. Raw error: ${lastError?.message?.slice(0, 200)}`
+    );
+  }
+
+  // yt-dlp may output multiple JSON lines — take the first valid one
+  let data = null;
+  for (const line of stdout.trim().split("\n")) {
+    try {
+      data = JSON.parse(line);
+      if (data.title) break;
+    } catch (_) {}
+  }
+
+  if (!data) throw new Error("yt-dlp returned no parseable data.");
+
   const title = data.title || "YouTube Video";
+  const rawComments = data.comments || [];
+
   const comments = truncate(
-    (data.comments || [])
+    rawComments
       .filter(c => c.text?.trim())
-      .map(c => ({ text: c.text, likes: c.like_count || 0, author: c.author || "" })),
+      .map(c => ({
+        text: c.text,
+        likes: c.like_count || 0,
+        author: c.author || "",
+      })),
     max
   );
+
+  // If yt-dlp got video info but 0 comments, comments may be disabled
+  if (comments.length === 0) {
+    throw new Error("No comments found. Comments may be disabled on this video, or yt-dlp needs updating. Run: pip install -U yt-dlp");
+  }
+
   return { title, comments };
 }
 
-// ── Reddit — public JSON API, zero auth needed ────────────────────────────────
-
+// ── Reddit ────────────────────────────────────────────────────────────────────
 async function scrapeReddit(url, max = 500) {
-  // Convert any reddit URL to JSON endpoint
-  const jsonUrl = url.replace(/\/?$/, ".json").replace("www.reddit.com", "www.reddit.com");
+  const jsonUrl = url.replace(/\/?(\?.*)?$/, ".json$1");
   const res = await axios.get(jsonUrl, {
     headers: { ...HEADERS, Accept: "application/json" },
     params: { limit: 500, depth: 3 },
@@ -48,39 +87,28 @@ async function scrapeReddit(url, max = 500) {
 
   const postData = res.data[0]?.data?.children?.[0]?.data;
   const title = postData?.title || "Reddit Post";
-
   const commentsData = res.data[1]?.data?.children || [];
 
   function extractComments(children, result = []) {
     for (const child of children) {
       const d = child.data;
       if (child.kind === "t1" && d.body && d.body !== "[deleted]" && d.body !== "[removed]") {
-        result.push({
-          text: d.body,
-          likes: d.score || 0,
-          author: d.author || "",
-        });
-        if (d.replies?.data?.children) {
-          extractComments(d.replies.data.children, result);
-        }
+        result.push({ text: d.body, likes: d.score || 0, author: d.author || "" });
+        if (d.replies?.data?.children) extractComments(d.replies.data.children, result);
       }
     }
     return result;
   }
 
-  const comments = truncate(extractComments(commentsData), max);
-  return { title, comments };
+  return { title, comments: truncate(extractComments(commentsData), max) };
 }
 
-// ── Play Store — public web scrape ───────────────────────────────────────────
-
+// ── Play Store ────────────────────────────────────────────────────────────────
 async function scrapePlayStore(url, max = 500) {
-  // Extract app ID from URL
   const match = url.match(/id=([a-zA-Z0-9_.]+)/);
   if (!match) throw new Error("Invalid Play Store URL. Example: https://play.google.com/store/apps/details?id=com.example.app");
   const appId = match[1];
 
-  // Use google-play-scraper via a quick node inline call
   const cmd = `node -e "
     const gplay = require('google-play-scraper');
     Promise.all([
@@ -94,23 +122,19 @@ async function scrapePlayStore(url, max = 500) {
   const { stdout } = await execPromise(cmd, { maxBuffer: 10 * 1024 * 1024, timeout: 30000 });
   const parsed = JSON.parse(stdout.trim());
 
-  const comments = truncate(
-    (parsed.reviews || []).map(r => ({
-      text: r.text || "",
-      likes: r.thumbsUp || 0,
-      author: r.userName || "",
-      rating: r.score,
-    })).filter(r => r.text.trim()),
-    max
-  );
-
-  return { title: parsed.title || "Play Store App", comments };
+  return {
+    title: parsed.title || "Play Store App",
+    comments: truncate(
+      (parsed.reviews || [])
+        .filter(r => r.text?.trim())
+        .map(r => ({ text: r.text, likes: r.thumbsUp || 0, author: r.userName || "", rating: r.score })),
+      max
+    ),
+  };
 }
 
-// ── App Store — public RSS feed ───────────────────────────────────────────────
-
+// ── App Store ─────────────────────────────────────────────────────────────────
 async function scrapeAppStore(url, max = 500) {
-  // Extract app ID from URL
   const match = url.match(/id(\d+)/);
   if (!match) throw new Error("Invalid App Store URL. Example: https://apps.apple.com/app/id123456789");
   const appId = match[1];
@@ -128,47 +152,33 @@ async function scrapeAppStore(url, max = 500) {
   const { stdout } = await execPromise(cmd, { maxBuffer: 10 * 1024 * 1024, timeout: 30000 });
   const parsed = JSON.parse(stdout.trim());
 
-  const comments = truncate(
-    (parsed.reviews || []).map(r => ({
-      text: r.text || "",
-      likes: 0,
-      author: r.userName || "",
-      rating: r.score,
-    })).filter(r => r.text.trim()),
-    max
-  );
-
-  return { title: parsed.title || "App Store App", comments };
+  return {
+    title: parsed.title || "App Store App",
+    comments: truncate(
+      (parsed.reviews || [])
+        .filter(r => r.text?.trim())
+        .map(r => ({ text: r.text, likes: 0, author: r.userName || "", rating: r.score })),
+      max
+    ),
+  };
 }
 
-// ── Kick — public API ────────────────────────────────────────────────────────
-
+// ── Kick ──────────────────────────────────────────────────────────────────────
 async function scrapeKick(url, max = 500) {
-  // Extract channel name from URL: kick.com/channelname or kick.com/video/id
   const channelMatch = url.match(/kick\.com\/([^/?#]+)/);
   if (!channelMatch) throw new Error("Invalid Kick URL.");
   const channel = channelMatch[1];
 
-  // Fetch channel clips/VOD comments via public API
   const infoRes = await axios.get(`https://kick.com/api/v2/channels/${channel}`, { headers: HEADERS });
-  const title = infoRes.data?.user?.username
-    ? `${infoRes.data.user.username}'s Kick Channel`
-    : "Kick Channel";
+  const title = infoRes.data?.user?.username ? `${infoRes.data.user.username}'s Kick Channel` : "Kick Channel";
 
-  // Get recent chat messages from latest clip
   const clipsRes = await axios.get(`https://kick.com/api/v2/channels/${channel}/clips`, {
-    headers: HEADERS,
-    params: { page: 1, clip_type: 1 },
+    headers: HEADERS, params: { page: 1, clip_type: 1 },
   });
 
-  const clips = clipsRes.data?.clips || [];
   const comments = [];
-
-  for (const clip of clips.slice(0, 5)) {
-    const clipRes = await axios.get(
-      `https://kick.com/api/v2/clips/${clip.clip_id}`,
-      { headers: HEADERS }
-    ).catch(() => null);
+  for (const clip of (clipsRes.data?.clips || []).slice(0, 5)) {
+    const clipRes = await axios.get(`https://kick.com/api/v2/clips/${clip.clip_id}`, { headers: HEADERS }).catch(() => null);
     if (clipRes?.data?.clip?.comments) {
       for (const c of clipRes.data.clip.comments) {
         comments.push({ text: c.content || "", likes: c.liked_by_count || 0, author: c.user?.username || "" });
@@ -180,49 +190,29 @@ async function scrapeKick(url, max = 500) {
   return { title, comments: truncate(comments.filter(c => c.text.trim()), max) };
 }
 
-// ── LinkedIn — note: heavily restricted ──────────────────────────────────────
-
-async function scrapeLinkedIn(url, max = 500) {
-  throw new Error(
-    "LinkedIn blocks all scraping heavily. To analyze LinkedIn posts, copy the post comments manually and use our 'Paste text' option (coming soon)."
-  );
-}
-
-// ── Instagram — note: requires login ─────────────────────────────────────────
-
-async function scrapeInstagram(url, max = 500) {
-  throw new Error(
-    "Instagram requires login to fetch comments. Coming soon — will use instaloader with your credentials."
-  );
-}
-
-// ── Detector — auto-detect platform from URL ─────────────────────────────────
-
+// ── Platform detector ─────────────────────────────────────────────────────────
 function detectPlatform(url) {
   if (/youtube\.com|youtu\.be/.test(url)) return "youtube";
-  if (/reddit\.com/.test(url)) return "reddit";
-  if (/play\.google\.com/.test(url)) return "playstore";
-  if (/apps\.apple\.com/.test(url)) return "appstore";
-  if (/kick\.com/.test(url)) return "kick";
-  if (/linkedin\.com/.test(url)) return "linkedin";
-  if (/instagram\.com/.test(url)) return "instagram";
+  if (/reddit\.com/.test(url))            return "reddit";
+  if (/play\.google\.com/.test(url))      return "playstore";
+  if (/apps\.apple\.com/.test(url))       return "appstore";
+  if (/kick\.com/.test(url))              return "kick";
+  if (/linkedin\.com/.test(url))          return "linkedin";
+  if (/instagram\.com/.test(url))         return "instagram";
   return "unknown";
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
-
 async function scrape(url, max = 500) {
   const platform = detectPlatform(url);
-
   switch (platform) {
     case "youtube":   return { platform, ...(await scrapeYouTube(url, max)) };
     case "reddit":    return { platform, ...(await scrapeReddit(url, max)) };
     case "playstore": return { platform, ...(await scrapePlayStore(url, max)) };
     case "appstore":  return { platform, ...(await scrapeAppStore(url, max)) };
     case "kick":      return { platform, ...(await scrapeKick(url, max)) };
-    case "linkedin":  return { platform, ...(await scrapeLinkedIn(url, max)) };
-    case "instagram": return { platform, ...(await scrapeInstagram(url, max)) };
-    default: throw new Error("Unsupported platform. Supported: YouTube, Reddit, Play Store, App Store, Kick.");
+    case "linkedin":
+    case "instagram": throw new Error(`${platform} scraping coming soon — requires login flow.`);
+    default: throw new Error("Unsupported platform. Paste a YouTube, Reddit, Play Store, App Store, or Kick URL.");
   }
 }
 

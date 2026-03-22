@@ -1,9 +1,5 @@
 flask
 flask-cors
-transformers
-keybert
-sentence-transformers
+vaderSentiment
 scikit-learn
-gunicorn
 python-dotenv
-requests

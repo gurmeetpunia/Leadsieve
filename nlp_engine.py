@@ -1,48 +1,48 @@
 """
-Leadsieve — Python NLP Engine
-Runs as a Flask microservice on port 5001
+Leadsieve — Python NLP Engine (Lightweight Edition)
+Total size: ~80MB vs previous 8GB
+- VADER sentiment (built for social media — more accurate than DistilBERT for comments)
+- TF-IDF theme extraction (sklearn — already a small dep)
+- Zero torch, zero transformers, zero sentence-transformers
 """
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from collections import Counter
 import re
+import math
 
 # ── Lazy-loaded models ────────────────────────────────────────────────────────
-_sentiment_pipeline = None
-_kw_model = None
+_vader = None
+_tfidf = None
 
-def get_sentiment_pipeline():
-    global _sentiment_pipeline
-    if _sentiment_pipeline is None:
-        print("Loading sentiment model (first time — takes ~30 seconds)...")
-        from transformers import pipeline as hf_pipeline   # fix: renamed to avoid shadowing
-        _sentiment_pipeline = hf_pipeline(
-            "sentiment-analysis",
-            model="distilbert-base-uncased-finetuned-sst-2-english",
-            max_length=512,
-            truncation=True,
-            device=-1   # fix: explicit CPU — silences device warning
+def get_vader():
+    global _vader
+    if _vader is None:
+        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+        _vader = SentimentIntensityAnalyzer()
+        print("VADER ready.")
+    return _vader
+
+def get_tfidf():
+    global _tfidf
+    if _tfidf is None:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        _tfidf = TfidfVectorizer(
+            ngram_range=(1, 3),
+            stop_words='english',
+            max_features=500,
+            min_df=2,
         )
-        print("Sentiment model ready.")
-    return _sentiment_pipeline
-
-def get_kw_model():
-    global _kw_model
-    if _kw_model is None:
-        print("Loading KeyBERT model...")
-        from keybert import KeyBERT
-        _kw_model = KeyBERT(model="all-MiniLM-L6-v2")
-        print("KeyBERT ready.")
-    return _kw_model
-
-# fix: removed get_spacy() entirely — spaCy was loaded but never used in analyze()
+        print("TF-IDF ready.")
+    return _tfidf
 
 # ── Text helpers ──────────────────────────────────────────────────────────────
 
 def clean_text(text):
     text = re.sub(r'<[^>]+>', ' ', text)
     text = re.sub(r'http\S+', '', text)
+    text = re.sub(r'[^\w\s\?\!\.\,]', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
@@ -50,12 +50,12 @@ def is_question(text):
     text = text.strip()
     if text.endswith('?'):
         return True
-    question_starters = (
+    starters = (
         'what', 'why', 'how', 'when', 'where', 'who', 'which',
         'can you', 'could you', 'do you', 'is there', 'are there',
         'will you', 'please tell', 'anyone know'
     )
-    return text.lower().startswith(question_starters)
+    return text.lower().startswith(starters)
 
 def chunk_list(lst, size):
     for i in range(0, len(lst), size):
@@ -64,76 +64,102 @@ def chunk_list(lst, size):
 # ── Core analysis ─────────────────────────────────────────────────────────────
 
 def analyze_sentiment(comments):
-    sent_pipeline = get_sentiment_pipeline()   # fix: renamed local var
-    texts = [clean_text(c['text'])[:500] for c in comments]
-
+    """
+    VADER sentiment — purpose-built for social media text.
+    Handles emojis, slang, caps, punctuation naturally.
+    compound score: >= 0.05 = positive, <= -0.05 = negative, else neutral
+    """
+    analyzer = get_vader()
     results = []
-    for i, batch in enumerate(chunk_list(list(zip(comments, texts)), 32)):
-        print(f"  Sentiment batch {i+1}...")
-        batch_texts = [t for _, t in batch]
-        batch_comments = [c for c, _ in batch]
-        preds = sent_pipeline(batch_texts)
-        for comment, pred in zip(batch_comments, preds):
-            label = pred['label'].lower()
-            if 'pos' in label:
-                norm = 'positive'
-            elif 'neg' in label:
-                norm = 'negative'
-            else:
-                norm = 'neutral'
-            results.append({
-                'text': comment['text'],
-                'likes': comment.get('likes', 0),
-                'label': norm,
-                'score': round(pred['score'], 3)
-            })
+
+    for comment in comments:
+        text = clean_text(comment['text'])
+        if not text:
+            continue
+        scores = analyzer.polarity_scores(text)
+        compound = scores['compound']
+
+        if compound >= 0.05:
+            label = 'positive'
+        elif compound <= -0.05:
+            label = 'negative'
+        else:
+            label = 'neutral'
+
+        results.append({
+            'text': comment['text'],
+            'likes': comment.get('likes', 0),
+            'label': label,
+            'score': round(abs(compound), 3)
+        })
+
     return results
 
 def extract_themes(comments, top_n=6):
-    kw_model = get_kw_model()
-    combined = ' '.join([clean_text(c['text']) for c in comments[:300]])
+    """
+    TF-IDF based theme extraction.
+    Finds keyphrases that are statistically important across all comments.
+    """
+    vectorizer = get_tfidf()
+    texts = [clean_text(c['text']) for c in comments if clean_text(c['text'])]
 
-    keywords = kw_model.extract_keywords(
-        combined,
-        keyphrase_ngram_range=(1, 3),
-        stop_words='english',
-        top_n=top_n * 2,
-        diversity=0.6,
-        use_mmr=True
-    )
+    if len(texts) < 3:
+        return []
 
-    themes = []
-    seen = set()
+    try:
+        tfidf_matrix = vectorizer.fit_transform(texts)
+        feature_names = vectorizer.get_feature_names_out()
 
-    for kw, relevance in keywords:
-        kw_lower = kw.lower()
-        count = sum(1 for c in comments if kw_lower in clean_text(c['text']).lower())
-        if count < 2:
-            continue
-        if any(kw_lower in s or s in kw_lower for s in seen):
-            continue
-        seen.add(kw_lower)
+        # Sum TF-IDF scores across all docs to find globally important terms
+        scores = tfidf_matrix.sum(axis=0).A1
+        term_scores = list(zip(feature_names, scores))
+        term_scores.sort(key=lambda x: x[1], reverse=True)
 
-        sample_comments = [
-            c['text'] for c in comments
-            if kw_lower in clean_text(c['text']).lower()
-        ][:3]
+        themes = []
+        seen = set()
 
-        themes.append({
-            'theme': kw.title(),
-            'count': count,
-            'description': (
-                f"Mentioned in {count} comments. Example: \"{sample_comments[0][:80]}...\""
-                if sample_comments else f"Mentioned {count} times."
-            ),
-            'sentiment': 'neutral',
-            'relevance': round(relevance, 3)
-        })
+        for term, score in term_scores:
+            term_lower = term.lower()
 
-        if len(themes) >= top_n:
-            break
+            # Skip very short or very common terms
+            if len(term_lower) < 4:
+                continue
 
-    return themes
+            # Deduplicate overlapping phrases
+            if any(term_lower in s or s in term_lower for s in seen):
+                continue
+            seen.add(term_lower)
+
+            # Count how many comments contain this term
+            count = sum(1 for t in texts if term_lower in t.lower())
+            if count < 2:
+                continue
+
+            # Sample comments containing this theme
+            sample = next(
+                (c['text'] for c in comments if term_lower in clean_text(c['text']).lower()),
+                None
+            )
+
+            themes.append({
+                'theme': term.title(),
+                'count': count,
+                'description': (
+                    f"Mentioned in {count} comments. Example: \"{sample[:80]}...\""
+                    if sample else f"Mentioned in {count} comments."
+                ),
+                'sentiment': 'neutral',
+                'relevance': round(float(score), 3)
+            })
+
+            if len(themes) >= top_n:
+                break
+
+        return themes
+
+    except Exception as e:
+        print(f"TF-IDF error: {e}")
+        return []
 
 def extract_questions(comments):
     questions = []
@@ -281,11 +307,11 @@ def get_notable_comments(sentiment_results):
 # ── Flask app ─────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
-CORS(app)   # fix: Flask-CORS 4.x works fine with just CORS(app)
+CORS(app)
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'service': 'leadsieve-nlp'})
+    return jsonify({'status': 'ok', 'service': 'leadsieve-nlp', 'mode': 'lightweight'})
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
@@ -298,7 +324,7 @@ def analyze():
 
     print(f"\nAnalyzing {len(comments)} comments for: {video_title}")
 
-    print("Step 1: Sentiment analysis...")
+    print("Step 1: Sentiment analysis (VADER)...")
     sentiment_results = analyze_sentiment(comments)
 
     counts = Counter(r['label'] for r in sentiment_results)
@@ -309,7 +335,7 @@ def analyze():
         'negative': round(counts.get('negative', 0) / total * 100),
     }
 
-    print("Step 2: Theme extraction...")
+    print("Step 2: Theme extraction (TF-IDF)...")
     themes = extract_themes(comments, top_n=6)
     for theme in themes:
         matching = [
@@ -327,7 +353,7 @@ def analyze():
     praises = extract_praises(sentiment_results)
 
     print("Step 5: Notable comments...")
-    notable = get_notable_comments(sentiment_results)   # fix: removed unused `comments` arg
+    notable = get_notable_comments(sentiment_results)
 
     print("Step 6: Insights and summary...")
     insights = generate_insights(themes, sentiment_pct, questions, pain_points)
@@ -348,6 +374,6 @@ def analyze():
     return jsonify(report)
 
 if __name__ == '__main__':
-    print("\n🧠 Leadsieve NLP Engine starting on port 5001...")
-    print("Models load on first request — be patient the first time.\n")
+    print("\n🧠 Leadsieve NLP Engine (Lightweight) starting on port 5001...")
+    print("No model downloads needed — starts instantly.\n")
     app.run(port=5001, debug=False)
