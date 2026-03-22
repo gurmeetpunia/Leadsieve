@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  nlp-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_ENV=development
+      - FLASK_APP=nlp_engine.py
+    volumes:
+      - .:/app
+    command: python nlp_engine.py
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NLP_ENGINE_URL=http://nlp-engine:5001
+      - PORT=3000
+    volumes:
+      - .:/app
+    depends_on:
+      - nlp-engine
+    command: node server.js
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3000
+    volumes:
+      - ./client:/app
+    command: npm run dev
+    depends_on:
+      - backend

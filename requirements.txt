@@ -4,3 +4,6 @@ transformers
 keybert
 sentence-transformers
 scikit-learn
+gunicorn
+python-dotenv
+requests
